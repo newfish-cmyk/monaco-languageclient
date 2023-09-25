@@ -17,50 +17,21 @@ import { WebSocketMessageReader, WebSocketMessageWriter, toSocket } from 'vscode
 import { RegisteredFileSystemProvider, registerFileSystemOverlay, RegisteredMemoryFile } from 'vscode/service-override/files';
 
 import { buildWorkerDefinition } from 'monaco-editor-workers';
-import { createUrl } from '../../common.js';
 buildWorkerDefinition('../../../node_modules/monaco-editor-workers/dist/workers/', new URL('', window.location.href).href, false);
 
 const languageId = 'python';
-let languageClient: MonacoLanguageClient;
+let languageclient: MonacoLanguageClient;
 
-const createWebSocket = (url: string): WebSocket => {
-    const webSocket = new WebSocket(url);
-    webSocket.onopen = async () => {
-        const socket = toSocket(webSocket);
-        const reader = new WebSocketMessageReader(socket);
-        const writer = new WebSocketMessageWriter(socket);
-        languageClient = createLanguageClient({
-            reader,
-            writer
-        });
-        await languageClient.start();
-        reader.onClose(() => languageClient.stop());
-    };
-    return webSocket;
-};
-
-const createLanguageClient = (transports: MessageTransports): MonacoLanguageClient => {
+const createLanguageClient = (transports: MessageTransports) => {
     return new MonacoLanguageClient({
-        name: 'Pyright Language Client',
+        name: 'ts client',
         clientOptions: {
-            // use a language id as a document selector
             documentSelector: [languageId],
-            // disable the default error handler
             errorHandler: {
                 error: () => ({ action: ErrorAction.Continue }),
                 closed: () => ({ action: CloseAction.DoNotRestart })
-            },
-            // pyright requires a workspace folder to be present, otherwise it will not work
-            workspaceFolder: {
-                index: 0,
-                name: 'workspace',
-                uri: monaco.Uri.parse('/tmp')
-            },
-            synchronize: {
-                fileEvents: [vscode.workspace.createFileSystemWatcher('**')]
             }
         },
-        // create a language client connection from the JSON RPC connection on demand
         connectionProvider: {
             get: () => {
                 return Promise.resolve(transports);
@@ -69,14 +40,26 @@ const createLanguageClient = (transports: MessageTransports): MonacoLanguageClie
     });
 };
 
-export const startPythonClient = async () => {
-    // init vscode-api
+const createWebSocket = (url:string) => {
+    const webSocket = new WebSocket(url);
+    webSocket.onopen = async () => {
+        const socket = toSocket(webSocket);
+        const reader = new WebSocketMessageReader(socket);
+        const writer = new WebSocketMessageWriter(socket);
+        languageclient = createLanguageClient({ reader, writer });
+        await languageclient.start();
+        reader.onClose(() => languageclient.stop());
+    };
+    return webSocket;
+};
+
+export const startTSClient = async () => {
     await initServices({
         enableModelService: true,
         enableThemeService: true,
         enableTextmateService: true,
         configureConfigurationService: {
-            defaultWorkspaceUri: '/tmp'
+            defaultWorkspaceUri: '/'
         },
         enableLanguagesService: true,
         enableKeybindingsService: true,
@@ -84,11 +67,8 @@ export const startPythonClient = async () => {
         logLevel: LogLevel.Debug
     });
 
-    // extension configuration derived from:
-    // https://github.com/microsoft/pyright/blob/main/packages/vscode-pyright/package.json
-    // only a minimum is required to get pyright working
     const extension = {
-        name: 'python-client',
+        name: 'typescript-client',
         publisher: 'monaco-languageclient-project',
         version: '1.0.0',
         engines: {
@@ -96,32 +76,13 @@ export const startPythonClient = async () => {
         },
         contributes: {
             languages: [{
-                id: languageId,
-                aliases: [
-                    'Python'
-                ],
-                extensions: [
-                    '.py',
-                    '.pyi'
-                ]
-            }],
-            commands: [{
-                command: 'pyright.restartserver',
-                title: 'Pyright: Restart Server',
-                category: 'Pyright'
-            },
-            {
-                command: 'pyright.organizeimports',
-                title: 'Pyright: Organize Imports',
-                category: 'Pyright'
-            }],
-            keybindings: [{
-                key: 'ctrl+k',
-                command: 'pyright.restartserver',
-                when: 'editorTextFocus'
+                id: 'typescript',
+                aliases: ['TypeScript', 'ts'],
+                extensions: ['.ts', '.tsx']
             }]
         }
     };
+
     registerExtension(extension, ExtensionHostKind.LocalProcess);
 
     updateUserConfiguration(`{
@@ -130,37 +91,14 @@ export const startPythonClient = async () => {
     }`);
 
     const fileSystemProvider = new RegisteredFileSystemProvider(false);
-    fileSystemProvider.registerFile(new RegisteredMemoryFile(vscode.Uri.file('/tmp/hello.py'), 'print("Hello, World!")'));
+    fileSystemProvider.registerFile(new RegisteredMemoryFile(vscode.Uri.file('/test.ts'), 'console.log("test");'));
     registerFileSystemOverlay(1, fileSystemProvider);
 
-    // create the web socket and configure to start the language client on open, can add extra parameters to the url if needed.
-    createWebSocket(createUrl('localhost', 30000, '/pyright', {
-        // Used to parse an auth token or additional parameters such as import IDs to the language server
-        authorization: 'UserAuth'
-        // By commenting above line out and commenting below line in, connection to language server will be denied.
-        // authorization: 'FailedUserAuth'
-    }, false));
+    createWebSocket('ws://localhost:30000');
 
-    const registerCommand = async (cmdName: string, handler: (...args: unknown[]) => void) => {
-        // commands sould not be there, but it demonstrates how to retrieve list of all external commands
-        const commands = await vscode.commands.getCommands(true);
-        if (!commands.includes(cmdName)) {
-            vscode.commands.registerCommand(cmdName, handler);
-        }
-    };
-    // always exectute the command with current language client
-    await registerCommand('pyright.restartserver', (...args: unknown[]) => {
-        languageClient.sendRequest('workspace/executeCommand', { command: 'pyright.restartserver', arguments: args });
-    });
-    await registerCommand('pyright.organizeimports', (...args: unknown[]) => {
-        languageClient.sendRequest('workspace/executeCommand', { command: 'pyright.organizeimports', arguments: args });
-    });
-
-    // use the file create before
-    const modelRef = await createModelReference(monaco.Uri.file('/tmp/hello.py'));
+    const modelRef = await createModelReference(monaco.Uri.file('/test.ts'));
     modelRef.object.setLanguageId(languageId);
 
-    // create monaco editor
     createConfiguredEditor(document.getElementById('container')!, {
         model: modelRef.object.textEditorModel,
         automaticLayout: true

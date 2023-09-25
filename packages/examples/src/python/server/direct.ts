@@ -8,5 +8,6 @@ import { runPythonServer } from './main.js';
 import { getLocalDirectory } from '../../utils/fs-utils.js';
 
 const baseDir = resolve(getLocalDirectory(import.meta.url));
-const relativeDir = '../../../../../node_modules/pyright/dist/pyright-langserver.js';
+// const relativeDir = '../../../../../node_modules/pyright/dist/pyright-langserver.js';
+const relativeDir = '../../../../../node_modules/typescript-language-server/lib/cli.mjs';
 runPythonServer(baseDir, relativeDir);

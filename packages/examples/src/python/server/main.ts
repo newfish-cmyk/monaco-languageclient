@@ -4,7 +4,6 @@
  * ------------------------------------------------------------------------------------------ */
 import { WebSocketServer } from 'ws';
 import { IncomingMessage } from 'http';
-import { URL } from 'url';
 import { Socket } from 'net';
 import express from 'express';
 import { resolve } from 'path';
@@ -60,50 +59,32 @@ export const runPythonServer = (baseDir: string, relativeDir: string) => {
     const wss = new WebSocketServer({
         noServer: true,
         perMessageDeflate: false,
-        clientTracking: true,
-        verifyClient: (
-            clientInfo: { origin: string; secure: boolean; req: IncomingMessage },
-            callback
-        ) => {
-            const parsedURL = new URL(`${clientInfo.origin}${clientInfo.req?.url ?? ''}`);
-            const authToken = parsedURL.searchParams.get('authorization');
-            if (authToken === 'UserAuth') {
-                // eslint-disable-next-line n/no-callback-literal
-                callback(true);
-            } else {
-                // eslint-disable-next-line n/no-callback-literal
-                callback(false);
-            }
-        }
+        clientTracking: true
     });
 
     server.on('upgrade', (request: IncomingMessage, socket: Socket, head: Buffer) => {
-        const baseURL = `http://${request.headers.host}/`;
-        const pathname = request.url ? new URL(request.url, baseURL).pathname : undefined;
-        if (pathname === '/pyright') {
-            wss.handleUpgrade(request, socket, head, webSocket => {
-                const socket: IWebSocket = {
-                    send: content => webSocket.send(content, error => {
-                        if (error) {
-                            throw error;
-                        }
-                    }),
-                    onMessage: cb => webSocket.on('message', (data) => {
-                        cb(data);
-                    }),
-                    onError: cb => webSocket.on('error', cb),
-                    onClose: cb => webSocket.on('close', cb),
-                    dispose: () => webSocket.close()
-                };
-                // launch the server when the web socket is opened
-                if (webSocket.readyState === webSocket.OPEN) {
+        wss.handleUpgrade(request, socket, head, webSocket => {
+            const socket: IWebSocket = {
+                send: content => webSocket.send(content, error => {
+                    if (error) {
+                        throw error;
+                    }
+                }),
+                onMessage: cb => webSocket.on('message', (data) => {
+                    cb(data);
+                }),
+                onError: cb => webSocket.on('error', cb),
+                onClose: cb => webSocket.on('close', cb),
+                dispose: () => webSocket.close()
+            };
+            // launch the server when the web socket is opened
+            if (webSocket.readyState === webSocket.OPEN) {
+                launchLanguageServer(socket, baseDir, relativeDir);
+            } else {
+                webSocket.on('open', () => {
                     launchLanguageServer(socket, baseDir, relativeDir);
-                } else {
-                    webSocket.on('open', () => {
-                        launchLanguageServer(socket, baseDir, relativeDir);
-                    });
-                }
-            });
-        }
+                });
+            }
+        });
     });
 };
